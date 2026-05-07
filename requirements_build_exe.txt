@@ -1,0 +1,8 @@
+pyinstaller>=6.0
+# 오프라인 법률/행정 문서 마스킹용 기본 런타임
+pypdf>=4.0.0
+# 네이티브 PDF 레닥션 필수
+pymupdf>=1.26.7
+pymupdf4llm>=0.0.9
+# 선택(용량 큼): paddleocr
+# 선택(용량 큼 + 별도 CLI 필요): marker-pdf
