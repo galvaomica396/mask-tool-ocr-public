@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-양천구 문맥 기반 로컬 문서 마스킹 GUI v2
+서울시 자치구 일반 패턴 기반 로컬 문서 마스킹 GUI v2
 - TXT/PDF 입력 지원
 - PDF는 로컬 OCR/추출 엔진으로 텍스트·레이아웃 추출 후 마스킹
 - 기본값은 오프라인 처리 (외부 API 없음)
@@ -126,11 +126,6 @@ PLACE_PATS = [
     SEOUL_GU_PAT,
     SEOUL_GU_ONLY_PAT,
     SEOUL_GU_OFFICE_PAT,
-    re.compile(r"(서울특별시|서울시|서울)\s*양천구"),
-    re.compile(r"양천구"),
-    re.compile(r"목\s*(?:[1-5]\s*)?동"),
-    re.compile(r"신정\s*(?:(?:1|2|3|4|6|7)\s*)?동"),
-    re.compile(r"신월\s*(?:[1-7]\s*)?동"),
 ]
 
 # 지번은 '번지' 접미가 있을 때만 마스킹해 사건번호/연도 숫자 오탐을 줄임
