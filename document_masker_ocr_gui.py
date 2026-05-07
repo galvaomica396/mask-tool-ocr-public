@@ -126,6 +126,11 @@ PLACE_PATS = [
     SEOUL_GU_PAT,
     SEOUL_GU_ONLY_PAT,
     SEOUL_GU_OFFICE_PAT,
+    re.compile(r"(서울특별시|서울시|서울)\s*양천구"),
+    re.compile(r"양천구"),
+    re.compile(r"목\s*(?:[1-5]\s*)?동"),
+    re.compile(r"신정\s*(?:(?:1|2|3|4|6|7)\s*)?동"),
+    re.compile(r"신월\s*(?:[1-7]\s*)?동"),
 ]
 
 # 지번은 '번지' 접미가 있을 때만 마스킹해 사건번호/연도 숫자 오탐을 줄임
