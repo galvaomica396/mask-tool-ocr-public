@@ -18,7 +18,7 @@ python3 document_masker_ocr_gui.py
 또는 `run_masking_gui.command` 더블클릭
 
 ### Windows 실행
-- 가장 쉬운 방법: GitHub Releases에서 `YangcheonMaskerOCR_v2.exe` 다운로드 후 실행
+- 가장 쉬운 방법: GitHub Releases에서 `DocumentMaskerOCR.exe` 다운로드 후 실행
 - Python으로 직접 실행하려면:
 ```powershell
 py -m pip install -r requirements.txt
