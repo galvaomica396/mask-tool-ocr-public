@@ -12,10 +12,16 @@ python3 -m pip install -r requirements.txt
 ```
 
 ### macOS 실행
+권장 실행(충돌 방지):
 ```bash
-python3 document_masker_ocr_gui.py
+/opt/homebrew/bin/python3 -m pip install -r requirements.txt
+/opt/homebrew/bin/python3 document_masker_ocr_gui.py
 ```
-또는 `run_masking_gui.command` 더블클릭
+또는 `run_mac.command` / `run_masking_gui.command` 더블클릭
+
+macOS에서 앱이 바로 꺼지면(Abort trap / Tk 오류):
+- `check_mac_env.command` 실행 후 결과 확인
+- 시스템 Python(`/usr/bin/python3`) 대신 Homebrew Python(`/opt/homebrew/bin/python3`) 사용
 
 ### Windows 실행
 - 가장 쉬운 방법(권장): GitHub Releases의 `DocumentMaskerOCR_windows_portable_v*.zip` 다운로드
