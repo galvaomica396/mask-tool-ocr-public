@@ -1748,12 +1748,12 @@ class MaskerApp(tk.Tk):
         ttk.Button(hero, text="폴더 선택", command=self.select_outdir).grid(row=3, column=4, sticky="w", padx=16, pady=(0, 14))
 
         controls = ttk.Frame(shell)
-        controls.grid(row=1, column=0, sticky="ew", pady=(12, 10))
+        controls.grid(row=1, column=0, sticky="ew", pady=(10, 8))
         controls.columnconfigure(0, weight=4)
         controls.columnconfigure(1, weight=2)
 
-        rules_card = ttk.LabelFrame(controls, text="마스킹 규칙")
-        rules_card.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.rules_card = ttk.LabelFrame(controls, text="마스킹 규칙")
+        self.rules_card.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         self.rule_vars: dict[str, tk.BooleanVar] = {
             "rrn": self.var_rrn,
             "phone": self.var_phone,
@@ -1794,7 +1794,7 @@ class MaskerApp(tk.Tk):
         ]
         for idx, (key, label, variable) in enumerate(rule_specs):
             btn = tk.Checkbutton(
-                rules_card,
+                self.rules_card,
                 text=label,
                 variable=variable,
                 indicatoron=False,
@@ -1810,7 +1810,7 @@ class MaskerApp(tk.Tk):
                 pady=5,
                 highlightthickness=0,
             )
-            btn.grid(row=idx // 4, column=idx % 4, sticky="we", padx=8, pady=6)
+            btn.grid(row=idx // 8, column=idx % 8, sticky="we", padx=5, pady=4)
             variable.trace_add("write", lambda *_args, b=btn, v=variable: self._refresh_rule_toggle_button(b, v))
             self._refresh_rule_toggle_button(btn, variable)
 
@@ -1826,18 +1826,21 @@ class MaskerApp(tk.Tk):
         ttk.Combobox(mode_card, textvariable=self.var_output_artifacts, values=OUTPUT_ARTIFACT_LABELS, state="readonly", width=16).grid(row=5, column=0, sticky="ew", padx=12)
         ttk.Checkbutton(mode_card, text="자동 PDF 레닥션", variable=self.var_pdf_redaction).grid(row=6, column=0, sticky="w", padx=12, pady=(12, 4))
         ttk.Checkbutton(mode_card, text="텍스트 동기 스크롤", variable=self.var_sync_scroll).grid(row=7, column=0, sticky="w", padx=12, pady=4)
-        ttk.Checkbutton(mode_card, text="PDF 동기 페이지 이동", variable=self.var_sync_pdf_page).grid(row=8, column=0, sticky="w", padx=12, pady=(4, 12))
+        ttk.Checkbutton(mode_card, text="PDF 동기 페이지 이동", variable=self.var_sync_pdf_page).grid(row=8, column=0, sticky="w", padx=12, pady=(4, 8))
+        self.var_rules_visible = tk.BooleanVar(value=True)
+        self.btn_toggle_rules = ttk.Button(mode_card, text="마스킹 규칙 숨기기", command=self._toggle_rules_panel)
+        self.btn_toggle_rules.grid(row=9, column=0, sticky="ew", padx=12, pady=(0, 8))
         mode_card.columnconfigure(0, weight=1)
 
-        ttk.Separator(mode_card, orient="horizontal").grid(row=9, column=0, sticky="ew", padx=12, pady=(10, 8))
+        ttk.Separator(mode_card, orient="horizontal").grid(row=10, column=0, sticky="ew", padx=12, pady=(8, 8))
         self.btn_run = ttk.Button(mode_card, text="마스킹 실행", style="Accent.TButton", command=self.run_masking)
-        self.btn_run.grid(row=10, column=0, sticky="ew", padx=12, pady=(2, 6))
-        ttk.Button(mode_card, text="중지 요청", command=self.request_stop).grid(row=11, column=0, sticky="ew", padx=12, pady=4)
-        ttk.Button(mode_card, text="창 비우기", command=self.clear_texts).grid(row=12, column=0, sticky="ew", padx=12, pady=(4, 8))
+        self.btn_run.grid(row=11, column=0, sticky="ew", padx=12, pady=(2, 6))
+        ttk.Button(mode_card, text="중지 요청", command=self.request_stop).grid(row=12, column=0, sticky="ew", padx=12, pady=4)
+        ttk.Button(mode_card, text="창 비우기", command=self.clear_texts).grid(row=13, column=0, sticky="ew", padx=12, pady=(4, 8))
         self.progress = ttk.Progressbar(mode_card, mode="determinate", length=220)
-        self.progress.grid(row=13, column=0, sticky="ew", padx=12, pady=(2, 6))
+        self.progress.grid(row=14, column=0, sticky="ew", padx=12, pady=(2, 6))
         self.lbl_progress = ttk.Label(mode_card, text="0/0", style="Muted.TLabel")
-        self.lbl_progress.grid(row=14, column=0, sticky="e", padx=(0, 12), pady=(0, 12))
+        self.lbl_progress.grid(row=15, column=0, sticky="e", padx=(0, 12), pady=(0, 12))
         mode_card.columnconfigure(0, weight=1)
 
         notebook = ttk.Notebook(shell)
@@ -1912,7 +1915,19 @@ class MaskerApp(tk.Tk):
         self.canvas_masked.bind("<ButtonPress-1>", self._on_masked_canvas_press)
         self.canvas_masked.bind("<B1-Motion>", self._on_masked_canvas_drag)
         self.canvas_masked.bind("<ButtonRelease-1>", self._on_masked_canvas_release)
+        self._toggle_rules_panel()  # 기본값: 규칙 패널 접기(저해상도/고배율에서 미리보기 공간 우선)
         self._clear_pdf_preview()
+
+    def _toggle_rules_panel(self) -> None:
+        visible = bool(self.var_rules_visible.get())
+        if visible:
+            self.rules_card.grid_remove()
+            self.var_rules_visible.set(False)
+            self.btn_toggle_rules.configure(text="마스킹 규칙 펼치기")
+        else:
+            self.rules_card.grid()
+            self.var_rules_visible.set(True)
+            self.btn_toggle_rules.configure(text="마스킹 규칙 숨기기")
 
     def log(self, msg: str) -> None:
         timestamped = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
