@@ -1747,13 +1747,6 @@ class MaskerApp(tk.Tk):
         ttk.Entry(hero, textvariable=self.outdir_var).grid(row=2, column=4, columnspan=2, sticky="ew", padx=(16, 16), pady=(4, 10))
         ttk.Button(hero, text="폴더 선택", command=self.select_outdir).grid(row=3, column=4, sticky="w", padx=16, pady=(0, 14))
 
-        controls = ttk.Frame(shell)
-        controls.grid(row=1, column=0, sticky="ew", pady=(10, 8))
-        controls.columnconfigure(0, weight=4)
-        controls.columnconfigure(1, weight=2)
-
-        self.rules_card = ttk.LabelFrame(controls, text="마스킹 규칙")
-        self.rules_card.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         self.rule_vars: dict[str, tk.BooleanVar] = {
             "rrn": self.var_rrn,
             "phone": self.var_phone,
@@ -1786,36 +1779,22 @@ class MaskerApp(tk.Tk):
                 "court": True,
             },
         }
-        rule_specs = [
+        self.rule_specs = [
             ("rrn", "주민등록번호", self.var_rrn), ("phone", "전화번호", self.var_phone), ("business_reg", "사업자등록번호", self.var_business_reg), ("name", "이름(문맥)", self.var_name),
             ("address", "주소(문맥)", self.var_address), ("place", "서울+양천 지명", self.var_place), ("legal_party", "원고/피고 등 당사자명", self.var_legal_party), ("company", "회사/법인명", self.var_company),
             ("court", "법원명", self.var_court), ("case_title", "사건명", self.var_case_title), ("case_number", "사건번호", self.var_case_number), ("law_firm", "법무법인/사무소", self.var_law_firm),
             ("attorney", "변호사명", self.var_attorney), ("approval_line", "기안/검토/결재선", self.var_approval_line), ("region_context", "관할/소재지(지역)", self.var_region_context), ("doc_meta", "수신/참조/시행번호/담당부서", self.var_doc_meta),
         ]
-        for idx, (key, label, variable) in enumerate(rule_specs):
-            btn = tk.Checkbutton(
-                self.rules_card,
-                text=label,
-                variable=variable,
-                indicatoron=False,
-                selectcolor="#1f6feb",
-                activebackground="#2b7cff",
-                activeforeground="#ffffff",
-                bg="#e9eef6",
-                fg="#1a2a3d",
-                font=(self.ui_font_family, 10),
-                relief="flat",
-                bd=0,
-                padx=10,
-                pady=5,
-                highlightthickness=0,
-            )
-            btn.grid(row=idx // 8, column=idx % 8, sticky="we", padx=5, pady=4)
-            variable.trace_add("write", lambda *_args, b=btn, v=variable: self._refresh_rule_toggle_button(b, v))
-            self._refresh_rule_toggle_button(btn, variable)
 
-        mode_card = ttk.LabelFrame(controls, text="처리 모드 / 실행")
-        mode_card.grid(row=0, column=1, sticky="nsew")
+        work_area = ttk.Frame(shell)
+        work_area.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        shell.rowconfigure(1, weight=1)
+        work_area.columnconfigure(0, weight=4)
+        work_area.columnconfigure(1, weight=2)
+        work_area.rowconfigure(0, weight=1)
+
+        mode_card = ttk.LabelFrame(work_area, text="처리 모드 / 실행")
+        mode_card.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         ttk.Label(mode_card, text="문서 프로필").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 4))
         self.profile_cmb = ttk.Combobox(mode_card, textvariable=self.var_profile, values=["official", "legal"], state="readonly", width=16)
         self.profile_cmb.grid(row=1, column=0, sticky="ew", padx=12)
@@ -1827,8 +1806,7 @@ class MaskerApp(tk.Tk):
         ttk.Checkbutton(mode_card, text="자동 PDF 레닥션", variable=self.var_pdf_redaction).grid(row=6, column=0, sticky="w", padx=12, pady=(12, 4))
         ttk.Checkbutton(mode_card, text="텍스트 동기 스크롤", variable=self.var_sync_scroll).grid(row=7, column=0, sticky="w", padx=12, pady=4)
         ttk.Checkbutton(mode_card, text="PDF 동기 페이지 이동", variable=self.var_sync_pdf_page).grid(row=8, column=0, sticky="w", padx=12, pady=(4, 8))
-        self.var_rules_visible = tk.BooleanVar(value=True)
-        self.btn_toggle_rules = ttk.Button(mode_card, text="마스킹 규칙 숨기기", command=self._toggle_rules_panel)
+        self.btn_toggle_rules = ttk.Button(mode_card, text="마스킹 규칙 창 열기", command=self._open_rules_window)
         self.btn_toggle_rules.grid(row=9, column=0, sticky="ew", padx=12, pady=(0, 8))
         mode_card.columnconfigure(0, weight=1)
 
@@ -1843,8 +1821,8 @@ class MaskerApp(tk.Tk):
         self.lbl_progress.grid(row=15, column=0, sticky="e", padx=(0, 12), pady=(0, 12))
         mode_card.columnconfigure(0, weight=1)
 
-        notebook = ttk.Notebook(shell)
-        notebook.grid(row=2, column=0, sticky="nsew")
+        notebook = ttk.Notebook(work_area)
+        notebook.grid(row=0, column=0, sticky="nsew")
         text_tab = ttk.Frame(notebook)
         pdf_tab = ttk.Frame(notebook)
         notebook.add(text_tab, text="텍스트 비교")
@@ -1915,19 +1893,53 @@ class MaskerApp(tk.Tk):
         self.canvas_masked.bind("<ButtonPress-1>", self._on_masked_canvas_press)
         self.canvas_masked.bind("<B1-Motion>", self._on_masked_canvas_drag)
         self.canvas_masked.bind("<ButtonRelease-1>", self._on_masked_canvas_release)
-        self._toggle_rules_panel()  # 기본값: 규칙 패널 접기(저해상도/고배율에서 미리보기 공간 우선)
         self._clear_pdf_preview()
 
-    def _toggle_rules_panel(self) -> None:
-        visible = bool(self.var_rules_visible.get())
-        if visible:
-            self.rules_card.grid_remove()
-            self.var_rules_visible.set(False)
-            self.btn_toggle_rules.configure(text="마스킹 규칙 펼치기")
-        else:
-            self.rules_card.grid()
-            self.var_rules_visible.set(True)
-            self.btn_toggle_rules.configure(text="마스킹 규칙 숨기기")
+    def _open_rules_window(self) -> None:
+        existing = getattr(self, "rules_window", None)
+        if existing is not None and existing.winfo_exists():
+            existing.deiconify()
+            existing.lift()
+            existing.focus_force()
+            return
+
+        win = tk.Toplevel(self)
+        win.title("마스킹 규칙")
+        win.geometry("980x300")
+        win.minsize(860, 240)
+        win.configure(bg="#eef2f7")
+        self.rules_window = win
+
+        outer = ttk.Frame(win)
+        outer.pack(fill="both", expand=True, padx=12, pady=12)
+        outer.columnconfigure(0, weight=1)
+
+        grid = ttk.Frame(outer)
+        grid.grid(row=0, column=0, sticky="nsew")
+
+        for idx, (_key, label, variable) in enumerate(self.rule_specs):
+            btn = tk.Checkbutton(
+                grid,
+                text=label,
+                variable=variable,
+                indicatoron=False,
+                selectcolor="#1f6feb",
+                activebackground="#2b7cff",
+                activeforeground="#ffffff",
+                bg="#e9eef6",
+                fg="#1a2a3d",
+                font=(self.ui_font_family, 10),
+                relief="flat",
+                bd=0,
+                padx=10,
+                pady=6,
+                highlightthickness=0,
+            )
+            btn.grid(row=idx // 4, column=idx % 4, sticky="we", padx=6, pady=6)
+            grid.columnconfigure(idx % 4, weight=1)
+            self._refresh_rule_toggle_button(btn, variable)
+
+        ttk.Label(outer, text="체크 상태는 본창과 즉시 동기화됩니다.", style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(8, 0))
 
     def log(self, msg: str) -> None:
         timestamped = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
