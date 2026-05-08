@@ -40,3 +40,11 @@ py document_masker_ocr_gui.py
 
 ## 4) 라이선스
 MIT
+
+
+Windows 최신코드 실행(권장, Python 방식)
+1. 이 저장소를 ZIP으로 받아 압축 해제
+2. 같은 폴더에서 `run_windows_python.bat` 더블클릭
+3. 자동으로 requirements 설치 후 GUI 실행
+
+주의: GitHub의 Source code.zip/tar.gz는 실행파일이 아니라 소스코드입니다.
