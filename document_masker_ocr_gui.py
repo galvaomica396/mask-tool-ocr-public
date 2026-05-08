@@ -1643,6 +1643,7 @@ class MaskerApp(tk.Tk):
         self.manual_boxes: list[ManualRedactionBox] = []
         self.current_drag_rect_id: int | None = None
         self.drag_start_canvas: tuple[float, float] | None = None
+        self.log_file_path = os.path.join(tempfile.gettempdir(), "document_masker_gui_latest.log")
 
         self.ui_font_family = self._resolve_font_family("Pretendard")
         self.ui_mono_family = self._resolve_font_family("D2Coding")
@@ -1921,17 +1922,16 @@ class MaskerApp(tk.Tk):
         self.canvas_masked.bind("<ButtonPress-1>", self._on_masked_canvas_press)
         self.canvas_masked.bind("<B1-Motion>", self._on_masked_canvas_drag)
         self.canvas_masked.bind("<ButtonRelease-1>", self._on_masked_canvas_release)
-
-        bottom = ttk.LabelFrame(shell, text="처리 로그")
-        bottom.grid(row=3, column=0, sticky="ew", pady=(14, 0))
-        bottom.columnconfigure(0, weight=1)
-        self.txt_log = tk.Text(bottom, height=10, wrap="word", bg="#fbfdff", fg="#15273b", relief="flat", bd=0, padx=16, pady=14, highlightthickness=1, highlightbackground="#d7e1ee", font=(self.ui_mono_family, 10))
-        self.txt_log.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
         self._clear_pdf_preview()
 
     def log(self, msg: str) -> None:
-        self.txt_log.insert("end", msg + "\n")
-        self.txt_log.see("end")
+        timestamped = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
+        try:
+            with open(self.log_file_path, "a", encoding="utf-8") as f:
+                f.write(timestamped + "\n")
+        except Exception:
+            pass
+        print(timestamped)
         self.update_idletasks()
 
     def _refresh_rule_toggle_button(self, button: tk.Checkbutton, variable: tk.BooleanVar) -> None:
@@ -2093,7 +2093,11 @@ class MaskerApp(tk.Tk):
     def clear_texts(self) -> None:
         self.txt_input.delete("1.0", "end")
         self.txt_output.delete("1.0", "end")
-        self.txt_log.delete("1.0", "end")
+        try:
+            if os.path.exists(self.log_file_path):
+                os.remove(self.log_file_path)
+        except Exception:
+            pass
         self._clear_pdf_preview()
 
     def _on_text_scrollbar(self, widget: tk.Text, peer: tk.Text, *args: str) -> None:
