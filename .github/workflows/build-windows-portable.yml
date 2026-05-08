@@ -37,17 +37,17 @@ jobs:
       - name: Pack portable zip
         shell: pwsh
         run: |
-          Compress-Archive -Path dist/DocumentMaskerOCR/* -DestinationPath DocumentMaskerOCR_windows_portable_v${{ github.ref_name }}.zip
+          Compress-Archive -Path dist/DocumentMaskerOCR/* -DestinationPath DocumentMaskerOCR_windows_portable_${{ github.ref_name }}.zip
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: DocumentMaskerOCR_windows_portable
-          path: DocumentMaskerOCR_windows_portable_v${{ github.ref_name }}.zip
+          path: DocumentMaskerOCR_windows_portable_${{ github.ref_name }}.zip
 
       - name: Upload asset to release (tag push only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: DocumentMaskerOCR_windows_portable_v${{ github.ref_name }}.zip
+          files: DocumentMaskerOCR_windows_portable_${{ github.ref_name }}.zip
           fail_on_unmatched_files: true
