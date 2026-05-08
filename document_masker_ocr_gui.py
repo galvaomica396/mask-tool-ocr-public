@@ -1713,7 +1713,14 @@ class MaskerApp(tk.Tk):
         style.configure("TEntry", fieldbackground="#ffffff", foreground="#16212e", padding=6)
         style.configure("TCombobox", fieldbackground="#ffffff", foreground="#16212e", padding=4)
         style.configure("TNotebook", background="#eef2f7", borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(16, 10), background="#dde6f0", foreground="#3a4a5a")
+        # Windows 고배율(125~150%)에서 탭 라벨 잘림 방지: 탭 높이 여유 + 폰트 명시
+        style.configure(
+            "TNotebook.Tab",
+            padding=(16, 14),
+            background="#dde6f0",
+            foreground="#3a4a5a",
+            font=(self.ui_font_family, 10, "bold"),
+        )
         style.map("TNotebook.Tab", background=[("selected", "#ffffff")], foreground=[("selected", "#16212e")])
         style.configure("Horizontal.TProgressbar", troughcolor="#dbe4ef", background="#1f6feb", borderwidth=0)
 
