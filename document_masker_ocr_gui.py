@@ -1888,8 +1888,28 @@ class MaskerApp(tk.Tk):
         masked_panel.columnconfigure(0, weight=1)
         self.canvas_original = tk.Canvas(original_panel, bg="#edf2f8", highlightthickness=0)
         self.canvas_masked = tk.Canvas(masked_panel, bg="#edf2f8", highlightthickness=0, cursor="crosshair")
-        self.canvas_original.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        self.canvas_masked.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        self.scroll_y_original = ttk.Scrollbar(original_panel, orient="vertical", command=self.canvas_original.yview)
+        self.scroll_x_original = ttk.Scrollbar(original_panel, orient="horizontal", command=self.canvas_original.xview)
+        self.canvas_original.configure(yscrollcommand=self.scroll_y_original.set, xscrollcommand=self.scroll_x_original.set)
+
+        self.scroll_y_masked = ttk.Scrollbar(masked_panel, orient="vertical", command=self.canvas_masked.yview)
+        self.scroll_x_masked = ttk.Scrollbar(masked_panel, orient="horizontal", command=self.canvas_masked.xview)
+        self.canvas_masked.configure(yscrollcommand=self.scroll_y_masked.set, xscrollcommand=self.scroll_x_masked.set)
+
+        self.canvas_original.grid(row=0, column=0, sticky="nsew", padx=(10, 0), pady=(10, 0))
+        self.scroll_y_original.grid(row=0, column=1, sticky="ns", padx=(6, 10), pady=(10, 0))
+        self.scroll_x_original.grid(row=1, column=0, sticky="ew", padx=(10, 0), pady=(6, 10))
+
+        self.canvas_masked.grid(row=0, column=0, sticky="nsew", padx=(10, 0), pady=(10, 0))
+        self.scroll_y_masked.grid(row=0, column=1, sticky="ns", padx=(6, 10), pady=(10, 0))
+        self.scroll_x_masked.grid(row=1, column=0, sticky="ew", padx=(10, 0), pady=(6, 10))
+
+        original_panel.rowconfigure(1, weight=0)
+        original_panel.columnconfigure(1, weight=0)
+        masked_panel.rowconfigure(1, weight=0)
+        masked_panel.columnconfigure(1, weight=0)
+
         self.canvas_masked.bind("<ButtonPress-1>", self._on_masked_canvas_press)
         self.canvas_masked.bind("<B1-Motion>", self._on_masked_canvas_drag)
         self.canvas_masked.bind("<ButtonRelease-1>", self._on_masked_canvas_release)
@@ -1936,6 +1956,7 @@ class MaskerApp(tk.Tk):
                 highlightthickness=0,
             )
             btn.grid(row=idx // 4, column=idx % 4, sticky="we", padx=6, pady=6)
+            btn.configure(command=lambda b=btn, v=variable: self._refresh_rule_toggle_button(b, v))
             grid.columnconfigure(idx % 4, weight=1)
             self._refresh_rule_toggle_button(btn, variable)
 
@@ -2195,6 +2216,9 @@ class MaskerApp(tk.Tk):
             if canvas is None:
                 continue
             canvas.delete("all")
+            canvas.configure(scrollregion=(0, 0, 1200, 1200))
+            canvas.xview_moveto(0)
+            canvas.yview_moveto(0)
             canvas.create_text(30, 30, anchor="nw", text=message, fill="#64748b", font=(self.ui_font_family, 11))
         if hasattr(self, "lbl_original_page"):
             self.lbl_original_page.config(text="원문 0/0")
@@ -2246,8 +2270,11 @@ class MaskerApp(tk.Tk):
         pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
         photo = tk.PhotoImage(data=base64.b64encode(pix.tobytes("png")).decode("ascii"), format="png")
         self.preview_images[key] = photo
-        origin_x = max((canvas_width - photo.width()) / 2, 16)
-        origin_y = max((canvas_height - photo.height()) / 2, 16)
+        content_width = max(photo.width() + 32, canvas_width)
+        content_height = max(photo.height() + 32, canvas_height)
+        origin_x = max((content_width - photo.width()) / 2, 16)
+        origin_y = max((content_height - photo.height()) / 2, 16)
+        canvas.configure(scrollregion=(0, 0, content_width, content_height))
         canvas.create_rectangle(origin_x - 1, origin_y - 1, origin_x + photo.width() + 1, origin_y + photo.height() + 1, outline="#d2dbe7", fill="#ffffff")
         canvas.create_image(origin_x, origin_y, anchor="nw", image=photo)
         self.preview_layouts[key] = (PreviewRenderState(page_index=page_index, scale=scale, image_width=photo.width(), image_height=photo.height()), origin_x, origin_y)
@@ -2269,16 +2296,20 @@ class MaskerApp(tk.Tk):
     def _on_masked_canvas_press(self, event: tk.Event[Any]) -> None:
         if "masked" not in self.preview_layouts:
             return
-        self.drag_start_canvas = (float(event.x), float(event.y))
+        sx = float(self.canvas_masked.canvasx(event.x))
+        sy = float(self.canvas_masked.canvasy(event.y))
+        self.drag_start_canvas = (sx, sy)
         if self.current_drag_rect_id is not None:
             self.canvas_masked.delete(self.current_drag_rect_id)
-        self.current_drag_rect_id = self.canvas_masked.create_rectangle(event.x, event.y, event.x, event.y, outline="#ff8b6b", dash=(4, 3), width=2)
+        self.current_drag_rect_id = self.canvas_masked.create_rectangle(sx, sy, sx, sy, outline="#ff8b6b", dash=(4, 3), width=2)
 
     def _on_masked_canvas_drag(self, event: tk.Event[Any]) -> None:
         if self.drag_start_canvas is None or self.current_drag_rect_id is None:
             return
         x0, y0 = self.drag_start_canvas
-        self.canvas_masked.coords(self.current_drag_rect_id, x0, y0, event.x, event.y)
+        cx = float(self.canvas_masked.canvasx(event.x))
+        cy = float(self.canvas_masked.canvasy(event.y))
+        self.canvas_masked.coords(self.current_drag_rect_id, x0, y0, cx, cy)
 
     def _on_masked_canvas_release(self, event: tk.Event[Any]) -> None:
         if self.drag_start_canvas is None:
@@ -2292,12 +2323,14 @@ class MaskerApp(tk.Tk):
             return
         state, origin_x, origin_y = layout
         x0, y0 = self.drag_start_canvas
+        cx = float(self.canvas_masked.canvasx(event.x))
+        cy = float(self.canvas_masked.canvasy(event.y))
         self.drag_start_canvas = None
         page_rect = self.masked_pdf_doc[state.page_index].rect
-        left = max(0.0, min(x0, event.x) - origin_x) / state.scale
-        top = max(0.0, min(y0, event.y) - origin_y) / state.scale
-        right = min(page_rect.width, max(x0, event.x) - origin_x) / state.scale
-        bottom = min(page_rect.height, max(y0, event.y) - origin_y) / state.scale
+        left = max(0.0, min(x0, cx) - origin_x) / state.scale
+        top = max(0.0, min(y0, cy) - origin_y) / state.scale
+        right = min(page_rect.width, max(x0, cx) - origin_x) / state.scale
+        bottom = min(page_rect.height, max(y0, cy) - origin_y) / state.scale
         if right - left < 4 or bottom - top < 4:
             return
         self.manual_boxes.append(ManualRedactionBox(page_index=state.page_index, rect=(left, top, right, bottom)))
