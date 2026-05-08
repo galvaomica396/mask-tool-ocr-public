@@ -179,7 +179,7 @@ ATTORNEY_PAT = re.compile(
 )
 # 한국 행정공문 결재선/기안 라벨
 APPROVAL_LINE_PAT = re.compile(
-    r"(?P<label>\b(?:기안자|기안|검토자|검토|협조자|협조|결재권자|최종결재권자|결재자|전결권자|대결권자|전결|대결|결재)\b(?:\s*[:：]\s*|\s+))(?P<value>(?!(?:지침|절차|기준|양식|규정|문서|작성|검토|결재|업무|계획|방법|지시|공문|시행|요청|사유|완료|안내|결과|권한)(?=\s|$))[가-힣A-Za-z]{2,20})"
+    r"(?P<label>\b(?:기안자|기안|검토자|검토|협조자|협조|결재권자|최종결재권자|결재자|전결권자|대결권자|전결|대결|결재)\b(?:\s*[:：]\s*|\s+))(?P<value>(?!(?:지침|절차|기준|양식|규정|문서|작성|검토|결재|업무|계획|방법|지시|공문|시행|요청|사유|완료|안내|결과|권한|하여|위하여|대하여)(?=\s|$))[가-힣A-Za-z]{2,20})"
 )
 # 공직/사기업 직책·직급 + 이름 inline (예: "주무관 홍길동", "건축8급 김철수", "대리 박영수")
 OFFICIAL_ROLE_NAME_PAT = re.compile(
@@ -192,7 +192,7 @@ OFFICIAL_ROLE_NAME_PAT = re.compile(
     r"대리|과장|차장|부장|본부장|사업부장|파트장|매니저|"
     r"이사|상무|전무|부사장|사장|대표|대표이사|CEO|CTO|CFO|COO"
     r")\b(?:\s*[:：]\s*|\s+))"
-    r"(?P<value>(?!(?:지침|절차|기준|양식|규정|문서|작성|검토|결재|업무|계획|방법|지시|공문|시행|요청|사유|완료|안내|결과|권한)(?=\s|$))(?:[가-힣]{2,4}|[가-힣]\s*[가-힣]{1,3}))"
+    r"(?P<value>(?!(?:지침|절차|기준|양식|규정|문서|작성|검토|결재|업무|계획|방법|지시|공문|시행|요청|사유|완료|안내|결과|권한|하여|위하여|대하여)(?=\s|$))(?:[가-힣]{2,4}|[가-힣]\s*[가-힣]{1,3}))"
 )
 # 공문 지역/관할/소재지 라벨
 REGION_CONTEXT_PAT = re.compile(
@@ -1876,21 +1876,28 @@ class MaskerApp(tk.Tk):
         pdf_tab.rowconfigure(1, weight=1)
         toolbar = ttk.LabelFrame(pdf_tab, text="수동 보정 도구")
         toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
-        ttk.Label(toolbar, text="우측 미리보기 위에서 드래그해 추가 레닥션 박스를 지정합니다. 저장 시 새 파일명은 *_manual_redacted.pdf 형식입니다.", style="Muted.TLabel").grid(row=0, column=0, columnspan=10, sticky="w", padx=12, pady=(12, 8))
-        ttk.Button(toolbar, text="원문 이전", command=lambda: self._change_pdf_page("original", -1)).grid(row=1, column=0, padx=(12, 6), pady=(0, 12))
-        ttk.Button(toolbar, text="원문 다음", command=lambda: self._change_pdf_page("original", 1)).grid(row=1, column=1, padx=6, pady=(0, 12))
-        self.lbl_original_page = ttk.Label(toolbar, text="원문 0/0", style="Muted.TLabel")
-        self.lbl_original_page.grid(row=1, column=2, padx=(0, 20), pady=(0, 12))
-        ttk.Button(toolbar, text="결과 이전", command=lambda: self._change_pdf_page("masked", -1)).grid(row=1, column=3, padx=6, pady=(0, 12))
-        ttk.Button(toolbar, text="결과 다음", command=lambda: self._change_pdf_page("masked", 1)).grid(row=1, column=4, padx=6, pady=(0, 12))
-        self.lbl_masked_page = ttk.Label(toolbar, text="결과 0/0", style="Muted.TLabel")
-        self.lbl_masked_page.grid(row=1, column=5, padx=(0, 20), pady=(0, 12))
-        ttk.Button(toolbar, text="실행취소", command=self.undo_manual_box).grid(row=1, column=6, padx=6, pady=(0, 12))
-        ttk.Button(toolbar, text="전체초기화", command=self.reset_manual_boxes).grid(row=1, column=7, padx=6, pady=(0, 12))
-        ttk.Button(toolbar, text="수동 마스킹 저장", style="Accent.TButton", command=self.save_manual_redactions).grid(row=1, column=8, padx=6, pady=(0, 12))
-        self.lbl_manual_state = ttk.Label(toolbar, text="박스 0개", style="Muted.TLabel")
-        self.lbl_manual_state.grid(row=1, column=9, padx=(12, 12), pady=(0, 12), sticky="e")
-        toolbar.columnconfigure(9, weight=1)
+        ttk.Label(toolbar, text="우측 미리보기 위에서 드래그해 추가 레닥션 박스를 지정합니다. 저장 시 새 파일명은 *_manual_redacted.pdf 형식입니다.", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 8))
+
+        nav_row = ttk.Frame(toolbar)
+        nav_row.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 6))
+        ttk.Button(nav_row, text="원문 이전", command=lambda: self._change_pdf_page("original", -1)).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(nav_row, text="원문 다음", command=lambda: self._change_pdf_page("original", 1)).grid(row=0, column=1, padx=6)
+        self.lbl_original_page = ttk.Label(nav_row, text="원문 0/0", style="Muted.TLabel")
+        self.lbl_original_page.grid(row=0, column=2, padx=(4, 16))
+        ttk.Button(nav_row, text="결과 이전", command=lambda: self._change_pdf_page("masked", -1)).grid(row=0, column=3, padx=6)
+        ttk.Button(nav_row, text="결과 다음", command=lambda: self._change_pdf_page("masked", 1)).grid(row=0, column=4, padx=6)
+        self.lbl_masked_page = ttk.Label(nav_row, text="결과 0/0", style="Muted.TLabel")
+        self.lbl_masked_page.grid(row=0, column=5, padx=(4, 0))
+
+        action_row = ttk.Frame(toolbar)
+        action_row.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
+        ttk.Button(action_row, text="실행취소", command=self.undo_manual_box).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(action_row, text="전체초기화", command=self.reset_manual_boxes).grid(row=0, column=1, padx=6)
+        ttk.Button(action_row, text="수동 마스킹 저장", style="Accent.TButton", command=self.save_manual_redactions).grid(row=0, column=2, padx=6)
+        self.lbl_manual_state = ttk.Label(action_row, text="박스 0개", style="Muted.TLabel")
+        self.lbl_manual_state.grid(row=0, column=3, padx=(12, 0), sticky="e")
+        action_row.columnconfigure(3, weight=1)
+        toolbar.columnconfigure(0, weight=1)
 
         original_panel = ttk.LabelFrame(pdf_tab, text="원문 PDF")
         masked_panel = ttk.LabelFrame(pdf_tab, text="자동/수동 마스킹 PDF")
