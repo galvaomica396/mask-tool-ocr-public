@@ -392,6 +392,7 @@ class LLMCandidate:
 class ManualRedactionBox:
     page_index: int
     rect: tuple[float, float, float, float]
+    mode: str = "mask"  # mask | restore
 
 
 @dataclass(frozen=True)
@@ -1069,7 +1070,12 @@ def _redaction_search_terms(matches: list[RedactionMatch]) -> list[RedactionMatc
     return ordered
 
 
-def redact_pdf_native(pdf_path: str, output_pdf_path: str, matches: list[RedactionMatch]) -> dict[str, Any]:
+def redact_pdf_native(
+    pdf_path: str,
+    output_pdf_path: str,
+    matches: list[RedactionMatch],
+    exclude_boxes: list[ManualRedactionBox] | None = None,
+) -> dict[str, Any]:
     try:
         import fitz  # type: ignore
     except Exception as e:
@@ -1080,9 +1086,18 @@ def redact_pdf_native(pdf_path: str, output_pdf_path: str, matches: list[Redacti
         raise RuntimeError("PDF 레닥션 대상 문자열이 없어 레닥션을 건너뜁니다.")
 
     doc = fitz.open(pdf_path)
+    exclusion_rects: dict[int, list[Any]] = {}
+    if exclude_boxes:
+        for box in exclude_boxes:
+            if box.mode != "restore":
+                continue
+            exclusion_rects.setdefault(box.page_index, []).append(
+                fitz.Rect(min(box.rect[0], box.rect[2]), min(box.rect[1], box.rect[3]), max(box.rect[0], box.rect[2]), max(box.rect[1], box.rect[3]))
+            )
     try:
         annotations_added = 0
         terms_hit: list[str] = []
+        excluded_hits = 0
 
         for item in search_terms:
             found_for_term = False
@@ -1101,6 +1116,10 @@ def redact_pdf_native(pdf_path: str, output_pdf_path: str, matches: list[Redacti
                     if rects:
                         found_for_term = True
                     for rect in rects:
+                        page_exclusions = exclusion_rects.get(page_num, [])
+                        if page_exclusions and any(rect.intersects(ex) for ex in page_exclusions):
+                            excluded_hits += 1
+                            continue
                         page.add_redact_annot(rect, fill=(0, 0, 0))
                         annotations_added += 1
                         page_hits += 1
@@ -1160,6 +1179,8 @@ def redact_pdf_native(pdf_path: str, output_pdf_path: str, matches: list[Redacti
         "targets_hit": len(terms_hit),
         "annotations_added": annotations_added,
         "matched_terms_preview": terms_hit[:20],
+        "excluded_hits": excluded_hits,
+        "excluded_regions": sum(len(v) for v in exclusion_rects.values()),
         "verification": {
             "residual_hits": residual_hits,
             "residual_terms_preview": residual_terms[:20],
@@ -1187,6 +1208,8 @@ def apply_manual_redactions(
         applied = 0
         grouped: dict[int, list[tuple[float, float, float, float]]] = {}
         for box in boxes:
+            if box.mode != "mask":
+                continue
             grouped.setdefault(box.page_index, []).append(box.rect)
 
         for page_index, rects in grouped.items():
@@ -1217,6 +1240,41 @@ def apply_manual_redactions(
         "output_file": output_pdf_path,
         "boxes_applied": applied,
         "pages_touched": sorted(grouped.keys()),
+    }
+
+
+def apply_manual_edits_with_restore(
+    source_pdf_path: str,
+    output_pdf_path: str,
+    auto_matches: list[RedactionMatch],
+    manual_boxes: list[ManualRedactionBox],
+) -> dict[str, Any]:
+    restore_boxes = [b for b in manual_boxes if b.mode == "restore"]
+    mask_boxes = [b for b in manual_boxes if b.mode == "mask"]
+
+    temp_dir = tempfile.mkdtemp(prefix="masker_manual_restore_")
+    temp_auto_pdf = os.path.join(temp_dir, "auto_filtered.pdf")
+
+    auto_result = redact_pdf_native(source_pdf_path, temp_auto_pdf, auto_matches, exclude_boxes=restore_boxes)
+
+    if mask_boxes:
+        manual_result = apply_manual_redactions(temp_auto_pdf, output_pdf_path, mask_boxes)
+    else:
+        shutil.copyfile(temp_auto_pdf, output_pdf_path)
+        manual_result = {
+            "status": "skipped",
+            "output_file": output_pdf_path,
+            "boxes_applied": 0,
+            "pages_touched": [],
+        }
+
+    return {
+        "status": "applied",
+        "output_file": output_pdf_path,
+        "restore_boxes": len(restore_boxes),
+        "mask_boxes": len(mask_boxes),
+        "auto_redaction": auto_result,
+        "manual_redaction": manual_result,
     }
 
 
@@ -1622,8 +1680,7 @@ class MaskerApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("문서 마스킹 도구")
-        self.geometry("1460x980")
-        self.minsize(1240, 860)
+        self._configure_initial_window()
         self.configure(bg="#eef2f7")
 
         self.selected_files: list[str] = []
@@ -1641,6 +1698,9 @@ class MaskerApp(tk.Tk):
         self.preview_images: dict[str, tk.PhotoImage] = {}
         self.preview_layouts: dict[str, tuple[PreviewRenderState, float, float]] = {}
         self.manual_boxes: list[ManualRedactionBox] = []
+        self.var_manual_edit_mode = tk.StringVar(value="mask")
+        self.current_auto_redaction_matches: list[RedactionMatch] = []
+        self.current_run_opts: dict[str, Any] = {}
         self.current_drag_rect_id: int | None = None
         self.drag_start_canvas: tuple[float, float] | None = None
         self.log_file_path = os.path.join(tempfile.gettempdir(), "document_masker_gui_latest.log")
@@ -1680,6 +1740,18 @@ class MaskerApp(tk.Tk):
         self._apply_profile_preset(self.var_profile.get(), initial=True)
         self.bind("<Configure>", self._on_window_resize)
 
+    def _configure_initial_window(self) -> None:
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+
+        target_w = min(1460, max(1100, screen_w - 80))
+        target_h = min(980, max(760, screen_h - 120))
+        self.geometry(f"{target_w}x{target_h}+20+20")
+
+        min_w = min(1240, max(980, screen_w - 180))
+        min_h = min(860, max(700, screen_h - 220))
+        self.minsize(min_w, min_h)
+
     def _resolve_font_family(self, preferred: str) -> str:
         try:
             families = set(tkfont.families(self))
@@ -1700,34 +1772,37 @@ class MaskerApp(tk.Tk):
             pass
         self.option_add("*Font", (self.ui_font_family, 10))
         self.option_add("*TCombobox*Listbox*Font", (self.ui_font_family, 10))
-        style.configure(".", background="#eef2f7", foreground="#16212e")
-        style.configure("TFrame", background="#eef2f7")
-        style.configure("TLabelframe", background="#ffffff", borderwidth=1, relief="solid")
-        style.configure("TLabelframe.Label", background="#ffffff", foreground="#243447", font=(self.ui_font_family, 10, "bold"))
-        style.configure("TLabel", background="#eef2f7", foreground="#243447")
-        style.configure("Muted.TLabel", background="#eef2f7", foreground="#5b6b7a")
+        style.configure(".", background="#edf2f8", foreground="#0f172a")
+        style.configure("TFrame", background="#edf2f8")
+        style.configure("TLabelframe", background="#ffffff", borderwidth=1, relief="solid", bordercolor="#dbe5f2")
+        style.configure("TLabelframe.Label", background="#ffffff", foreground="#1e293b", font=(self.ui_font_family, 10, "bold"))
+        style.configure("TLabel", background="#edf2f8", foreground="#1e293b")
+        style.configure("Muted.TLabel", background="#edf2f8", foreground="#64748b")
         style.configure("TCheckbutton", background="#ffffff", foreground="#243447")
-        style.configure("TButton", font=(self.ui_font_family, 10, "bold"), padding=(12, 8), relief="flat", borderwidth=0, background="#ffffff", foreground="#142033")
-        style.map("TButton", background=[("active", "#f4f7fb"), ("pressed", "#dce6f4")])
-        style.configure("Accent.TButton", background="#1f6feb", foreground="#ffffff")
-        style.map("Accent.TButton", background=[("active", "#2b7cff"), ("pressed", "#1858be")], foreground=[("active", "#ffffff")])
+        style.configure("TButton", font=(self.ui_font_family, 10, "bold"), padding=(12, 8), relief="flat", borderwidth=1, background="#ffffff", foreground="#142033")
+        style.map("TButton", background=[("active", "#f8fbff"), ("pressed", "#e7eef8")], bordercolor=[("active", "#cfe0f7")])
+        style.configure("Accent.TButton", background="#2563eb", foreground="#ffffff", borderwidth=0)
+        style.map("Accent.TButton", background=[("active", "#1d4ed8"), ("pressed", "#1e40af")], foreground=[("active", "#ffffff")])
         style.configure("TEntry", fieldbackground="#ffffff", foreground="#16212e", padding=6)
-        style.configure("TCombobox", fieldbackground="#ffffff", foreground="#16212e", padding=4)
-        style.configure("TNotebook", background="#eef2f7", borderwidth=0)
+        style.configure("TCombobox", fieldbackground="#ffffff", foreground="#16212e", padding=5)
+        style.configure("TNotebook", background="#edf2f8", borderwidth=0)
         # Windows 고배율(125~150%)에서 탭 라벨 잘림 방지: 탭 높이 여유 + 폰트 명시
         style.configure(
             "TNotebook.Tab",
-            padding=(16, 14),
-            background="#dde6f0",
-            foreground="#3a4a5a",
+            padding=(14, 12),
+            background="#e7eef8",
+            foreground="#475569",
             font=(self.ui_font_family, 10, "bold"),
         )
         style.map("TNotebook.Tab", background=[("selected", "#ffffff")], foreground=[("selected", "#16212e")])
         style.configure("Horizontal.TProgressbar", troughcolor="#dbe4ef", background="#1f6feb", borderwidth=0)
 
     def _build_ui(self) -> None:
+        compact_ui = self.winfo_screenheight() <= 900
+        shell_padx = 10 if compact_ui else 18
+        shell_pady = 10 if compact_ui else 18
         shell = ttk.Frame(self)
-        shell.pack(fill="both", expand=True, padx=18, pady=18)
+        shell.pack(fill="both", expand=True, padx=shell_padx, pady=shell_pady)
         shell.columnconfigure(0, weight=1)
         shell.rowconfigure(2, weight=1)
 
@@ -1736,16 +1811,16 @@ class MaskerApp(tk.Tk):
         hero.columnconfigure(0, weight=1)
         hero.columnconfigure(4, weight=1)
         hero.columnconfigure(5, weight=1)
-        ttk.Label(hero, text="TXT/PDF를 선택한 뒤 프로필과 산출물을 정하면, 좌우 대조 미리보기와 PDF 수동 보정을 한 화면에서 이어서 진행할 수 있습니다.", style="Muted.TLabel").grid(row=0, column=0, columnspan=6, sticky="w", padx=16, pady=(14, 6))
-        ttk.Label(hero, text="입력 파일").grid(row=1, column=0, sticky="w", padx=16)
-        self.entry_files = tk.Text(hero, height=4, wrap="word", bg="#f8fafc", fg="#132238", relief="flat", bd=0, highlightthickness=1, highlightbackground="#d7e1ee", font=(self.ui_font_family, 10))
-        self.entry_files.grid(row=2, column=0, columnspan=6, sticky="ew", padx=16, pady=(4, 10))
-        ttk.Button(hero, text="파일 선택", style="Accent.TButton", command=self.select_files).grid(row=3, column=0, sticky="w", padx=(16, 8), pady=(0, 14))
-        ttk.Button(hero, text="목록 지우기", command=self.clear_files).grid(row=3, column=1, sticky="w", pady=(0, 14))
-        ttk.Label(hero, text="출력 폴더").grid(row=1, column=4, sticky="w", padx=16)
+        ttk.Label(hero, text="입력·출력 경로를 설정한 뒤 바로 마스킹을 실행하세요.", style="Muted.TLabel").grid(row=0, column=0, columnspan=6, sticky="w", padx=12, pady=(8, 4))
+        ttk.Label(hero, text="입력 파일").grid(row=1, column=0, sticky="w", padx=12)
+        self.entry_files = tk.Text(hero, height=3 if compact_ui else 4, wrap="word", bg="#f8fafc", fg="#132238", relief="flat", bd=0, highlightthickness=1, highlightbackground="#d7e1ee", font=(self.ui_font_family, 10))
+        self.entry_files.grid(row=2, column=0, columnspan=6, sticky="ew", padx=12, pady=(3, 8))
+        ttk.Button(hero, text="파일 선택", style="Accent.TButton", command=self.select_files).grid(row=3, column=0, sticky="w", padx=(12, 6), pady=(0, 10))
+        ttk.Button(hero, text="목록 지우기", command=self.clear_files).grid(row=3, column=1, sticky="w", pady=(0, 10))
+        ttk.Label(hero, text="출력 폴더").grid(row=1, column=4, sticky="w", padx=12)
         self.outdir_var = tk.StringVar(value="")
-        ttk.Entry(hero, textvariable=self.outdir_var).grid(row=2, column=4, columnspan=2, sticky="ew", padx=(16, 16), pady=(4, 10))
-        ttk.Button(hero, text="폴더 선택", command=self.select_outdir).grid(row=3, column=4, sticky="w", padx=16, pady=(0, 14))
+        ttk.Entry(hero, textvariable=self.outdir_var).grid(row=2, column=4, columnspan=2, sticky="ew", padx=(12, 12), pady=(3, 8))
+        ttk.Button(hero, text="폴더 선택", command=self.select_outdir).grid(row=3, column=4, sticky="w", padx=12, pady=(0, 10))
 
         self.rule_vars: dict[str, tk.BooleanVar] = {
             "rrn": self.var_rrn,
@@ -1786,23 +1861,29 @@ class MaskerApp(tk.Tk):
             ("attorney", "변호사명", self.var_attorney), ("approval_line", "기안/검토/결재선", self.var_approval_line), ("region_context", "관할/소재지(지역)", self.var_region_context), ("doc_meta", "수신/참조/시행번호/담당부서", self.var_doc_meta),
         ]
 
+        step_strip = ttk.LabelFrame(shell, text="작업 단계")
+        step_strip.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        step_strip.columnconfigure(0, weight=1)
+        step_text = "1 파일선택  →  2 모드선택  →  3 마스킹실행  →  4 텍스트비교  →  5 PDF보정  →  6 저장완료"
+        ttk.Label(step_strip, text=step_text, style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=10, pady=(6, 8))
+
         work_area = ttk.Frame(shell)
-        work_area.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
-        shell.rowconfigure(1, weight=1)
-        work_area.columnconfigure(0, weight=4)
-        work_area.columnconfigure(1, weight=2)
+        work_area.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
+        shell.rowconfigure(2, weight=1)
+        work_area.columnconfigure(0, weight=5, minsize=760)
+        work_area.columnconfigure(1, weight=3, minsize=330)
         work_area.rowconfigure(0, weight=1)
 
         mode_card = ttk.LabelFrame(work_area, text="처리 모드 / 실행")
         mode_card.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
-        ttk.Label(mode_card, text="문서 프로필").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 4))
-        self.profile_cmb = ttk.Combobox(mode_card, textvariable=self.var_profile, values=["official", "legal"], state="readonly", width=16)
+        ttk.Label(mode_card, text="문서 프로필", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 4))
+        self.profile_cmb = ttk.Combobox(mode_card, textvariable=self.var_profile, values=["official", "legal"], state="readonly", width=24)
         self.profile_cmb.grid(row=1, column=0, sticky="ew", padx=12)
         self.profile_cmb.bind("<<ComboboxSelected>>", self._on_profile_changed)
-        ttk.Label(mode_card, text="PDF 추출 엔진").grid(row=2, column=0, sticky="w", padx=12, pady=(12, 4))
-        ttk.Combobox(mode_card, textvariable=self.var_engine, values=["auto", "marker", "paddle", "pymupdf", "pypdf"], state="readonly", width=16).grid(row=3, column=0, sticky="ew", padx=12)
-        ttk.Label(mode_card, text="산출물 선택").grid(row=4, column=0, sticky="w", padx=12, pady=(12, 4))
-        ttk.Combobox(mode_card, textvariable=self.var_output_artifacts, values=OUTPUT_ARTIFACT_LABELS, state="readonly", width=16).grid(row=5, column=0, sticky="ew", padx=12)
+        ttk.Label(mode_card, text="PDF 추출 엔진", style="Muted.TLabel").grid(row=2, column=0, sticky="w", padx=12, pady=(12, 4))
+        ttk.Combobox(mode_card, textvariable=self.var_engine, values=["auto", "marker", "paddle", "pymupdf", "pypdf"], state="readonly", width=24).grid(row=3, column=0, sticky="ew", padx=12)
+        ttk.Label(mode_card, text="산출물 선택", style="Muted.TLabel").grid(row=4, column=0, sticky="w", padx=12, pady=(12, 4))
+        ttk.Combobox(mode_card, textvariable=self.var_output_artifacts, values=OUTPUT_ARTIFACT_LABELS, state="readonly", width=24).grid(row=5, column=0, sticky="ew", padx=12)
         ttk.Checkbutton(mode_card, text="자동 PDF 레닥션", variable=self.var_pdf_redaction).grid(row=6, column=0, sticky="w", padx=12, pady=(12, 4))
         ttk.Checkbutton(mode_card, text="텍스트 동기 스크롤", variable=self.var_sync_scroll).grid(row=7, column=0, sticky="w", padx=12, pady=4)
         ttk.Checkbutton(mode_card, text="PDF 동기 페이지 이동", variable=self.var_sync_pdf_page).grid(row=8, column=0, sticky="w", padx=12, pady=(4, 8))
@@ -1870,12 +1951,22 @@ class MaskerApp(tk.Tk):
 
         action_row = ttk.Frame(toolbar)
         action_row.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
-        ttk.Button(action_row, text="실행취소", command=self.undo_manual_box).grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(action_row, text="전체초기화", command=self.reset_manual_boxes).grid(row=0, column=1, padx=6)
-        ttk.Button(action_row, text="수동 마스킹 저장", style="Accent.TButton", command=self.save_manual_redactions).grid(row=0, column=2, padx=6)
-        self.lbl_manual_state = ttk.Label(action_row, text="박스 0개", style="Muted.TLabel")
-        self.lbl_manual_state.grid(row=0, column=3, padx=(12, 0), sticky="e")
-        action_row.columnconfigure(3, weight=1)
+
+        mode_row = ttk.Frame(action_row)
+        mode_row.grid(row=0, column=0, sticky="w")
+        ttk.Label(mode_row, text="드래그 모드", style="Muted.TLabel").grid(row=0, column=0, padx=(0, 8))
+        ttk.Radiobutton(mode_row, text="마스킹 추가", value="mask", variable=self.var_manual_edit_mode).grid(row=0, column=1, padx=(0, 8))
+        ttk.Radiobutton(mode_row, text="복원(자동해제)", value="restore", variable=self.var_manual_edit_mode).grid(row=0, column=2, padx=(0, 0))
+
+        action_btn_row = ttk.Frame(action_row)
+        action_btn_row.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(action_btn_row, text="실행취소", command=self.undo_manual_box).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(action_btn_row, text="전체초기화", command=self.reset_manual_boxes).grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(action_btn_row, text="수동 저장", style="Accent.TButton", command=self.save_manual_redactions).grid(row=0, column=2, padx=(0, 8))
+        self.lbl_manual_state = ttk.Label(action_btn_row, text="박스 0개", style="Muted.TLabel")
+        self.lbl_manual_state.grid(row=0, column=3, sticky="e")
+        action_btn_row.columnconfigure(3, weight=1)
+        action_row.columnconfigure(0, weight=1)
         toolbar.columnconfigure(0, weight=1)
 
         original_panel = ttk.LabelFrame(pdf_tab, text="원문 PDF")
@@ -2095,6 +2186,14 @@ class MaskerApp(tk.Tk):
                 extracted_text = read_text_file(extracted_path) if extracted_path else extract_result_text_for_preview(fp, opts)
                 masked_text = read_text_file(masked_path) if masked_path else mask_text_for_preview(extracted_text, opts)
                 self._set_text_preview(extracted_text, masked_text)
+                if Path(fp).suffix.lower() == ".pdf":
+                    try:
+                        _tmp_masked, _tmp_counts, matches_for_manual, _tmp_queue = process_masking_queue(extracted_text, opts)
+                        self.current_auto_redaction_matches = matches_for_manual
+                        self.current_run_opts = dict(opts)
+                    except Exception as _e:
+                        self.current_auto_redaction_matches = []
+                        self.current_run_opts = dict(opts)
                 last_output = masked_text
                 last_input = extracted_text
                 last_report = report
@@ -2210,6 +2309,8 @@ class MaskerApp(tk.Tk):
         self.current_input_pdf_path = None
         self.current_masked_preview_pdf_path = None
         self.current_manual_output_path = None
+        self.current_auto_redaction_matches = []
+        self.current_run_opts = {}
         self.original_pdf_page_index = 0
         self.masked_pdf_page_index = 0
         for canvas in (getattr(self, "canvas_original", None), getattr(self, "canvas_masked", None)):
@@ -2290,8 +2391,14 @@ class MaskerApp(tk.Tk):
         page_boxes = [box for box in self.manual_boxes if box.page_index == state.page_index]
         for idx, box in enumerate(page_boxes, 1):
             x0, y0, x1, y1 = box.rect
-            self.canvas_masked.create_rectangle(origin_x + x0 * state.scale, origin_y + y0 * state.scale, origin_x + x1 * state.scale, origin_y + y1 * state.scale, outline="#ff5c5c", width=2, tags="manual_box")
-            self.canvas_masked.create_text(origin_x + x0 * state.scale + 8, origin_y + y0 * state.scale + 8, anchor="nw", text=str(idx), fill="#ff5c5c", font=(self.ui_font_family, 10, "bold"), tags="manual_box")
+            if box.mode == "restore":
+                color = "#2f7de1"
+                label = f"R{idx}"
+            else:
+                color = "#ff5c5c"
+                label = f"M{idx}"
+            self.canvas_masked.create_rectangle(origin_x + x0 * state.scale, origin_y + y0 * state.scale, origin_x + x1 * state.scale, origin_y + y1 * state.scale, outline=color, width=2, tags="manual_box")
+            self.canvas_masked.create_text(origin_x + x0 * state.scale + 8, origin_y + y0 * state.scale + 8, anchor="nw", text=label, fill=color, font=(self.ui_font_family, 10, "bold"), tags="manual_box")
 
     def _on_masked_canvas_press(self, event: tk.Event[Any]) -> None:
         if "masked" not in self.preview_layouts:
@@ -2301,7 +2408,9 @@ class MaskerApp(tk.Tk):
         self.drag_start_canvas = (sx, sy)
         if self.current_drag_rect_id is not None:
             self.canvas_masked.delete(self.current_drag_rect_id)
-        self.current_drag_rect_id = self.canvas_masked.create_rectangle(sx, sy, sx, sy, outline="#ff8b6b", dash=(4, 3), width=2)
+        mode = self.var_manual_edit_mode.get()
+        outline_color = "#2f7de1" if mode == "restore" else "#ff8b6b"
+        self.current_drag_rect_id = self.canvas_masked.create_rectangle(sx, sy, sx, sy, outline=outline_color, dash=(4, 3), width=2)
 
     def _on_masked_canvas_drag(self, event: tk.Event[Any]) -> None:
         if self.drag_start_canvas is None or self.current_drag_rect_id is None:
@@ -2333,7 +2442,10 @@ class MaskerApp(tk.Tk):
         bottom = min(page_rect.height, max(y0, cy) - origin_y) / state.scale
         if right - left < 4 or bottom - top < 4:
             return
-        self.manual_boxes.append(ManualRedactionBox(page_index=state.page_index, rect=(left, top, right, bottom)))
+        mode = self.var_manual_edit_mode.get().strip().lower() or "mask"
+        if mode not in {"mask", "restore"}:
+            mode = "mask"
+        self.manual_boxes.append(ManualRedactionBox(page_index=state.page_index, rect=(left, top, right, bottom), mode=mode))
         self._update_manual_state_label()
         self._draw_manual_boxes()
 
@@ -2356,11 +2468,27 @@ class MaskerApp(tk.Tk):
             messagebox.showwarning("안내", "먼저 PDF 문서를 처리해 수동 보정 미리보기를 준비하세요.")
             return
         if not self.manual_boxes:
-            messagebox.showwarning("안내", "저장할 수동 마스킹 박스가 없습니다.")
+            messagebox.showwarning("안내", "저장할 수동 마스킹/복원 박스가 없습니다.")
             return
         try:
-            result = apply_manual_redactions(self.current_masked_preview_pdf_path, self.current_manual_output_path, self.manual_boxes)
-            self.log(f"[수동 저장] {result['output_file']} / boxes={result['boxes_applied']}")
+            restore_count = sum(1 for b in self.manual_boxes if b.mode == "restore")
+            if restore_count > 0:
+                if not self.current_input_pdf_path:
+                    raise RuntimeError("복원 기능은 원본 PDF 경로가 필요합니다.")
+                if not self.current_auto_redaction_matches:
+                    raise RuntimeError("복원 기능은 자동 마스킹 이력(매칭 결과)이 필요합니다. 파일을 다시 실행 후 시도해 주세요.")
+                result = apply_manual_edits_with_restore(
+                    self.current_input_pdf_path,
+                    self.current_manual_output_path,
+                    self.current_auto_redaction_matches,
+                    self.manual_boxes,
+                )
+                self.log(
+                    f"[수동 저장/복원] {result['output_file']} / mask={result['mask_boxes']} / restore={result['restore_boxes']}"
+                )
+            else:
+                result = apply_manual_redactions(self.current_masked_preview_pdf_path, self.current_manual_output_path, self.manual_boxes)
+                self.log(f"[수동 저장] {result['output_file']} / boxes={result['boxes_applied']}")
             self.current_masked_preview_pdf_path = result["output_file"]
             self._open_pdf_documents(self.current_input_pdf_path or result["output_file"], result["output_file"])
             messagebox.showinfo("저장 완료", f"수동 마스킹 PDF 저장 완료\n{result['output_file']}")
@@ -2369,7 +2497,9 @@ class MaskerApp(tk.Tk):
 
     def _update_manual_state_label(self) -> None:
         page_info = f" / 현재 페이지 {self.masked_pdf_page_index + 1}" if self._page_count(self.masked_pdf_doc) else ""
-        self.lbl_manual_state.config(text=f"박스 {len(self.manual_boxes)}개{page_info}")
+        mask_count = sum(1 for b in self.manual_boxes if b.mode == "mask")
+        restore_count = sum(1 for b in self.manual_boxes if b.mode == "restore")
+        self.lbl_manual_state.config(text=f"마스킹 {mask_count}개 / 복원 {restore_count}개{page_info}")
 
     def _on_window_resize(self, _event: tk.Event[Any]) -> None:
         if self.original_pdf_doc is None and self.masked_pdf_doc is None:

@@ -12,5 +12,11 @@ else
 fi
 
 echo "[INFO] Python: $PYTHON_BIN"
-"$PYTHON_BIN" -m pip install -r requirements.txt
-exec "$PYTHON_BIN" document_masker_ocr_gui.py
+VENV_DIR="$SCRIPT_DIR/.venv"
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+  "$PYTHON_BIN" -m venv "$VENV_DIR"
+fi
+
+"$VENV_DIR/bin/python" -m pip install --upgrade pip >/dev/null
+"$VENV_DIR/bin/python" -m pip install -r requirements.txt
+exec "$VENV_DIR/bin/python" document_masker_ocr_gui.py

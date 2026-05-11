@@ -49,13 +49,13 @@ py document_masker_ocr_gui.py
 - `*.report.YYYYmmdd_HHMMSS.json`
 
 ## 4) 최신 릴리즈 (OS별 분리)
-- 최신: v1.1.1
+- 최신: v1.1.2
 - Windows (포터블 실행파일):
-  - `DocumentMaskerOCR_windows_portable_v1.1.1.zip`
+  - `DocumentMaskerOCR_windows_portable_v1.1.2.zip`
 - macOS (Python 소스 실행 번들):
-  - `DocumentMaskerOCR_mac_python_bundle_v1.1.1.zip`
+  - `DocumentMaskerOCR_mac_python_bundle_v1.1.2.zip`
 - 릴리즈 페이지:
-  - https://github.com/galvaomica396/mask-tool-ocr-public/releases/tag/v1.1.1
+  - https://github.com/galvaomica396/mask-tool-ocr-public/releases/tag/v1.1.2
 
 ## 5) 라이선스
 MIT
